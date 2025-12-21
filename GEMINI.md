@@ -40,3 +40,4 @@ To run this project, you will need to have Python 3 and the required dependencie
 *   Card data is stored in a SQLite database named `mtg_collection.db`.
 *   The GUI is built using Tkinter.
 *   The application supports importing data from Excel files.
+
