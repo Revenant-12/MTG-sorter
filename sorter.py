@@ -202,6 +202,7 @@ class MTGCardManager:
         tk.Button(session_frame, text="Start Session", command=self.start_session, bg="#b3e6b3").pack(side="left", padx=5)
         tk.Button(session_frame, text="End Session", command=self.end_session, bg="#ffcccb").pack(side="left", padx=5)
         tk.Button(session_frame, text="Highlight Added Cards", command=self.highlight_session, bg="#ffff99").pack(side="left", padx=20)
+        tk.Button(session_frame, text="Unhighlight Cards", command=self.unhighlight_session, bg="#ffffff").pack(side="left", padx=5)
 
     def create_input_frame(self):
         input_frame = tk.LabelFrame(self.root, text="Card Details (Drag & Drop Excel Files Here)", padx=10, pady=5)
@@ -302,6 +303,15 @@ class MTGCardManager:
                     except: pass
                     
                     tree.item(item_id, tags=tuple(tags))
+
+    def unhighlight_session(self):
+        for main_cat in self.tree_dict:
+            for sub_cat in self.tree_dict[main_cat]:
+                tree = self.tree_dict[main_cat][sub_cat]
+                for item_id in tree.get_children():
+                    idx = tree.index(item_id)
+                    tags = ('odd',) if idx % 2 == 1 else ('even',)
+                    tree.item(item_id, tags=tags)
 
     def upsert_card(self, data):
         cursor = self.conn.cursor()
