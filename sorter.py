@@ -203,6 +203,51 @@ class MTGCardManager:
         tk.Button(session_frame, text="End Session", command=self.end_session, bg="#ffcccb").pack(side="left", padx=5)
         tk.Button(session_frame, text="Highlight Added Cards", command=self.highlight_session, bg="#ffff99").pack(side="left", padx=20)
         tk.Button(session_frame, text="Unhighlight Cards", command=self.unhighlight_session, bg="#ffffff").pack(side="left", padx=5)
+        
+        # Add Export Button
+        tk.Button(session_frame, text="Export to Excel", command=self.export_to_excel, bg="#add8e6").pack(side="right", padx=10)
+
+    def export_to_excel(self):
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            initialfile="mtg_collection.xlsx"
+        )
+        if not file_path:
+            return
+        
+        try:
+            # Read all data
+            df = pd.read_sql_query("SELECT * FROM cards ORDER BY name ASC", self.conn)
+            
+            # If the database is empty
+            if df.empty:
+                messagebox.showwarning("Export Warning", "The collection is empty. Nothing to export.")
+                return
+
+            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                # 1. Master Sheet
+                df.to_excel(writer, sheet_name='Master List', index=False)
+                
+                # 2. Sheets by Color
+                # Use the predefined colors to ensure consistent order and presence
+                for color in self.colors:
+                    color_df = df[df['color'] == color]
+                    if not color_df.empty:
+                        color_df.to_excel(writer, sheet_name=color, index=False)
+                
+                # 3. Handle any other colors not in self.colors (just in case)
+                other_colors = df[~df['color'].isin(self.colors)]['color'].unique()
+                for color in other_colors:
+                    if color and color not in self.colors:
+                        color_df = df[df['color'] == color]
+                        # Excel sheet names must be <= 31 chars
+                        sheet_name = str(color)[:31]
+                        color_df.to_excel(writer, sheet_name=sheet_name, index=False)
+            
+            messagebox.showinfo("Export Successful", f"Collection exported to:\n{file_path}")
+        except Exception as e:
+            messagebox.showerror("Export Error", f"An error occurred while exporting:\n{e}")
 
     def create_input_frame(self):
         input_frame = tk.LabelFrame(self.root, text="Card Details (Drag & Drop Excel Files Here)", padx=10, pady=5)
