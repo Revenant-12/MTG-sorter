@@ -264,19 +264,26 @@ class MTGCardManager:
         input_frame = tk.LabelFrame(self.root, text="Card Details (Drag & Drop Excel Files Here)", padx=10, pady=5)
         input_frame.pack(fill="x", padx=10, pady=5)
 
+        # Row 0: Name, Color, Qty, Category
         tk.Label(input_frame, text="Name:").grid(row=0, column=0, sticky="e")
         tk.Entry(input_frame, textvariable=self.var_name, width=25).grid(row=0, column=1, sticky="w")
         tk.Label(input_frame, text="Color:").grid(row=0, column=2, sticky="e")
         tk.Entry(input_frame, textvariable=self.var_color, width=15).grid(row=0, column=3, sticky="w")
-        tk.Label(input_frame, text="Quantity:").grid(row=0, column=4, sticky="e")
+        tk.Label(input_frame, text="Qty:").grid(row=0, column=4, sticky="e")
         tk.Entry(input_frame, textvariable=self.var_quantity, width=5).grid(row=0, column=5, sticky="w")
         tk.Label(input_frame, text="Category:").grid(row=0, column=6, sticky="e")
         self.type_combo = ttk.Combobox(input_frame, textvariable=self.var_type, values=self.card_types, state="readonly", width=20)
         self.type_combo.grid(row=0, column=7, sticky="w")
         self.type_combo.bind("<<ComboboxSelected>>", self.update_fields_visibility)
 
+        # Row 1: Set Code, Collector Number
+        tk.Label(input_frame, text="Set Code:").grid(row=1, column=0, sticky="e")
+        tk.Entry(input_frame, textvariable=self.var_set_code, width=10).grid(row=1, column=1, sticky="w")
+        tk.Label(input_frame, text="Card # (ID):").grid(row=1, column=2, sticky="e")
+        tk.Entry(input_frame, textvariable=self.var_collector_num, width=10).grid(row=1, column=3, sticky="w")
+
         self.dynamic_frame = tk.Frame(input_frame)
-        self.dynamic_frame.grid(row=1, column=0, columnspan=8, pady=5, sticky="w")
+        self.dynamic_frame.grid(row=2, column=0, columnspan=8, pady=5, sticky="w")
         self.lbl_mana = tk.Label(self.dynamic_frame, text="Mana Cost:")
         self.ent_mana = tk.Entry(self.dynamic_frame, textvariable=self.var_mana_cost, width=10)
         self.lbl_pt = tk.Label(self.dynamic_frame, text="P/T:")
@@ -291,7 +298,7 @@ class MTGCardManager:
         self.ent_loy = tk.Entry(self.dynamic_frame, textvariable=self.var_loyalty, width=5)
 
         btn_frame = tk.Frame(input_frame)
-        btn_frame.grid(row=2, column=0, columnspan=8, pady=5)
+        btn_frame.grid(row=3, column=0, columnspan=8, pady=5)
         self.btn_submit = tk.Button(btn_frame, text="Add Card", command=self.add_card, bg="#dddddd", width=15)
         self.btn_submit.pack(side="left", padx=5)
         self.btn_delete = tk.Button(btn_frame, text="Delete Card", command=self.delete_card, bg="#ff9999", width=15, state="disabled")
@@ -371,14 +378,16 @@ class MTGCardManager:
 
     def upsert_card(self, data):
         cursor = self.conn.cursor()
-        cursor.execute("SELECT id, quantity FROM cards WHERE name=? AND card_category=?", (data['name'], data['card_category']))
+        cursor.execute("SELECT id, quantity FROM cards WHERE name=? AND card_category=? AND set_code=? AND collector_number=?", 
+                      (data['name'], data['card_category'], data.get('set_code'), data.get('collector_number')))
         result = cursor.fetchone()
         row_id = None
         if result:
             row_id = result[0]
             cursor.execute("UPDATE cards SET quantity=? WHERE id=?", (result[1] + data['quantity'], row_id))
         else:
-            cursor.execute("INSERT INTO cards (name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty) VALUES (:name, :color, :quantity, :card_category, :mana_cost, :power_toughness, :subtypes, :keywords, :ability, :loyalty)", data)
+            cursor.execute("""INSERT INTO cards (name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number) 
+                           VALUES (:name, :color, :quantity, :card_category, :mana_cost, :power_toughness, :subtypes, :keywords, :ability, :loyalty, :set_code, :collector_number)""", data)
             row_id = cursor.lastrowid
         
         if self.session_active and row_id:
@@ -396,7 +405,8 @@ class MTGCardManager:
             "name": name, "color": self.var_color.get(), "quantity": self.var_quantity.get(),
             "card_category": cat, "mana_cost": self.var_mana_cost.get(), "power_toughness": self.var_pt.get(),
             "subtypes": self.var_subtypes.get(), "keywords": self.var_keywords.get(),
-            "ability": self.var_ability.get(), "loyalty": self.var_loyalty.get() if self.var_loyalty.get() else None
+            "ability": self.var_ability.get(), "loyalty": self.var_loyalty.get() if self.var_loyalty.get() else None,
+            "set_code": self.var_set_code.get().strip().upper(), "collector_number": self.var_collector_num.get().strip()
         }
         
         self.upsert_card(data)
@@ -411,7 +421,7 @@ class MTGCardManager:
                 self.tree_dict[main_cat][sub_cat].delete(*self.tree_dict[main_cat][sub_cat].get_children())
         
         cursor = self.conn.cursor()
-        cursor.execute("SELECT id, name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty FROM cards ORDER BY name ASC")
+        cursor.execute("SELECT id, name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number FROM cards ORDER BY name ASC")
         for row in cursor.fetchall():
             self.insert_row_to_ui(row)
 
@@ -449,10 +459,25 @@ class MTGCardManager:
     def clean_row(self, row):
         l = list(row)
         l.pop(0) # remove ID
-        q = l.pop(2) # pop qty
-        l.insert(0, q) 
+        # row: (name, color, qty, cat, cost, pt, sub, key, ab, loy, set, num)
+        # Treeview expects: (Qty, Name, Set, ID#, Color, Category, Cost, P/T, Subtypes, Keywords, Ability, Loyalty)
+        # l: [name, color, qty, cat, cost, pt, sub, key, ab, loy, set, num]
+        name = l[0]
+        color = l[1]
+        qty = l[2]
+        cat = l[3]
+        cost = l[4]
+        pt = l[5]
+        sub = l[6]
+        key = l[7]
+        ab = l[8]
+        loy = l[9]
+        set_code = l[10]
+        num = l[11]
+        
+        ordered = [qty, name, set_code, num, color, cat, cost, pt, sub, key, ab, loy]
         cleaned = []
-        for x in l:
+        for x in ordered:
             if x is None or str(x).lower() == 'nan': cleaned.append("")
             else: cleaned.append(str(x).replace('\n', ' '))
         return cleaned
@@ -464,7 +489,7 @@ class MTGCardManager:
         sel_costs = self.filter_cost.get_selected()
         sel_subs = self.filter_sub.get_selected()
 
-        query = "SELECT id, name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty FROM cards WHERE 1=1"
+        query = "SELECT id, name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number FROM cards WHERE 1=1"
         params = []
 
         if sel_colors:
@@ -519,7 +544,7 @@ class MTGCardManager:
         self.editing_card_id = None
         self.btn_submit.config(text="Add Card", bg="#dddddd", command=self.add_card)
         self.btn_delete.config(state="disabled")
-        for v in [self.var_name, self.var_color, self.var_type, self.var_mana_cost, self.var_pt, self.var_subtypes, self.var_keywords, self.var_ability, self.var_loyalty]: v.set("")
+        for v in [self.var_name, self.var_color, self.var_type, self.var_mana_cost, self.var_pt, self.var_subtypes, self.var_keywords, self.var_ability, self.var_loyalty, self.var_set_code, self.var_collector_num]: v.set("")
         self.var_quantity.set(1)
         self.update_fields_visibility()
 
@@ -543,6 +568,8 @@ class MTGCardManager:
             self.var_keywords.set(row[8] if row[8] else "")
             self.var_ability.set(row[9] if row[9] else "")
             self.var_loyalty.set(row[10] if row[10] else "")
+            self.var_set_code.set(row[11] if row[11] else "")
+            self.var_collector_num.set(row[12] if row[12] else "")
             
             self.update_fields_visibility()
             self.btn_submit.config(text="Save Changes", bg="#b3d9ff", command=self.save_edits)
@@ -554,8 +581,8 @@ class MTGCardManager:
             name = self.var_name.get().strip()
             cat = self.var_type.get()
             cursor = self.conn.cursor()
-            query = """UPDATE cards SET name=?, color=?, quantity=?, card_category=?, mana_cost=?, power_toughness=?, subtypes=?, keywords=?, ability=?, loyalty=? WHERE id=?"""
-            data = (name, self.var_color.get(), self.var_quantity.get(), cat, self.var_mana_cost.get(), self.var_pt.get(), self.var_subtypes.get(), self.var_keywords.get(), self.var_ability.get(), self.var_loyalty.get() if self.var_loyalty.get() else None, self.editing_card_id)
+            query = """UPDATE cards SET name=?, color=?, quantity=?, card_category=?, mana_cost=?, power_toughness=?, subtypes=?, keywords=?, ability=?, loyalty=?, set_code=?, collector_number=? WHERE id=?"""
+            data = (name, self.var_color.get(), self.var_quantity.get(), cat, self.var_mana_cost.get(), self.var_pt.get(), self.var_subtypes.get(), self.var_keywords.get(), self.var_ability.get(), self.var_loyalty.get() if self.var_loyalty.get() else None, self.var_set_code.get().strip().upper(), self.var_collector_num.get().strip(), self.editing_card_id)
             cursor.execute(query, data)
             self.conn.commit()
             
@@ -611,7 +638,7 @@ class MTGCardManager:
                         block_data = block_data.dropna(subset=["Name"])
                         for _, row in block_data.iterrows():
                             c_val = row["Color"] if "Color" in row and pd.notna(row["Color"]) else sheet_name
-                            data = {"name": row["Name"], "card_category": mapped_cat, "quantity": int(row["Quantity"]) if "Quantity" in row and pd.notna(row["Quantity"]) else 1, "color": c_val, "mana_cost": str(row["Cost"]) if "Cost" in row and pd.notna(row["Cost"]) else None, "power_toughness": str(row["Power/Toughness"]) if "Power/Toughness" in row and pd.notna(row["Power/Toughness"]) else None, "subtypes": str(row["Types"]) if "Types" in row and pd.notna(row["Types"]) else None, "keywords": str(row["Keywords"]) if "Keywords" in row and pd.notna(row["Keywords"]) else None, "ability": str(row["Ability"]) if "Ability" in row and pd.notna(row["Ability"]) else None, "loyalty": int(row["Base Loyalty"]) if "Base Loyalty" in row and pd.notna(row["Base Loyalty"]) else None}
+                            data = {"name": row["Name"], "card_category": mapped_cat, "quantity": int(row["Quantity"]) if "Quantity" in row and pd.notna(row["Quantity"]) else 1, "color": c_val, "mana_cost": str(row["Cost"]) if "Cost" in row and pd.notna(row["Cost"]) else None, "power_toughness": str(row["Power/Toughness"]) if "Power/Toughness" in row and pd.notna(row["Power/Toughness"]) else None, "subtypes": str(row["Types"]) if "Types" in row and pd.notna(row["Types"]) else None, "keywords": str(row["Keywords"]) if "Keywords" in row and pd.notna(row["Keywords"]) else None, "ability": str(row["Ability"]) if "Ability" in row and pd.notna(row["Ability"]) else None, "loyalty": int(row["Base Loyalty"]) if "Base Loyalty" in row and pd.notna(row["Base Loyalty"]) else None, "set_code": None, "collector_number": None}
                             for key, val in data.items():
                                 if str(val) == 'nan': data[key] = None
                             self.upsert_card(data)
@@ -631,7 +658,7 @@ class MTGCardManager:
             self.tree_dict[color_name][ctype] = self.create_treeview(type_frame)
 
     def create_treeview(self, parent_frame):
-        columns = ("Qty", "Name", "Color", "Category", "Cost", "P/T", "Subtypes", "Keywords", "Ability", "Loyalty")
+        columns = ("Qty", "Name", "Set", "ID#", "Color", "Category", "Cost", "P/T", "Subtypes", "Keywords", "Ability", "Loyalty")
         tree = ttk.Treeview(parent_frame, columns=columns, show="headings")
         
         # Configure Row Striping Tags
@@ -639,7 +666,7 @@ class MTGCardManager:
         tree.tag_configure('even', background='#FFFFFF') # White
         tree.tag_configure('session_highlight', background='#FFFF99') # Yellow Highlight
 
-        col_widths = [40, 250, 80, 120, 60, 50, 180, 120, 300, 50]
+        col_widths = [40, 250, 60, 60, 80, 120, 60, 50, 180, 120, 300, 50]
         for col, width in zip(columns, col_widths):
             tree.heading(col, text=col)
             tree.column(col, width=width, minwidth=50)

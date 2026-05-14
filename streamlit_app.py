@@ -25,9 +25,19 @@ def create_table():
             keywords TEXT,
             ability TEXT,
             loyalty INTEGER,
-            UNIQUE(name, card_category)
+            set_code TEXT,
+            collector_number TEXT,
+            UNIQUE(name, card_category, set_code, collector_number)
         )
     """)
+    # Migration for existing tables
+    try:
+        cursor.execute("ALTER TABLE cards ADD COLUMN set_code TEXT")
+    except sqlite3.OperationalError: pass
+    try:
+        cursor.execute("ALTER TABLE cards ADD COLUMN collector_number TEXT")
+    except sqlite3.OperationalError: pass
+    
     conn.commit()
     conn.close()
 
@@ -49,7 +59,8 @@ def get_split_subtypes(df):
 def add_card(data):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, quantity FROM cards WHERE name=? AND card_category=?", (data['name'], data['card_category']))
+    cursor.execute("SELECT id, quantity FROM cards WHERE name=? AND card_category=? AND set_code=? AND collector_number=?", 
+                  (data['name'], data['card_category'], data.get('set_code'), data.get('collector_number')))
     result = cursor.fetchone()
     row_id = None
     if result:
@@ -57,8 +68,8 @@ def add_card(data):
         cursor.execute("UPDATE cards SET quantity=? WHERE id=?", (result[1] + data['quantity'], row_id))
     else:
         cursor.execute("""
-            INSERT INTO cards (name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty) 
-            VALUES (:name, :color, :quantity, :card_category, :mana_cost, :power_toughness, :subtypes, :keywords, :ability, :loyalty)
+            INSERT INTO cards (name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number) 
+            VALUES (:name, :color, :quantity, :card_category, :mana_cost, :power_toughness, :subtypes, :keywords, :ability, :loyalty, :set_code, :collector_number)
         """, data)
         row_id = cursor.lastrowid
     conn.commit()
@@ -150,6 +161,12 @@ elif category == "Planeswalker":
 
 with st.sidebar.form("add_card_form", clear_on_submit=True):
     name = st.text_input("Card Name")
+    col_set1, col_set2 = st.columns(2)
+    with col_set1:
+        set_code = st.text_input("Set Code", help="e.g. SNC, M21")
+    with col_set2:
+        collector_num = st.text_input("Collector #", help="Card number in set")
+    
     color = st.selectbox("Color", ["White", "Blue", "Black", "Red", "Green", "Colorless", "Multicolor"])
     quantity = st.number_input("Quantity", min_value=1, value=1)
     
@@ -167,7 +184,9 @@ with st.sidebar.form("add_card_form", clear_on_submit=True):
                 "name": name, "color": color, "quantity": quantity,
                 "card_category": category, "mana_cost": mana_cost, "power_toughness": pt,
                 "subtypes": subtypes, "keywords": keywords, "ability": ability,
-                "loyalty": int(loyalty) if loyalty.isdigit() else None
+                "loyalty": int(loyalty) if loyalty.isdigit() else None,
+                "set_code": set_code.strip().upper(),
+                "collector_number": collector_num.strip()
             }
             row_id = add_card(new_card)
             if st.session_state.session_active and row_id:
@@ -229,7 +248,7 @@ if not filtered_df.empty:
     cols_to_show = [col for col in filtered_df.columns if col != 'id']
     
     # Essential columns we always want to see
-    essential = ['name', 'color', 'quantity', 'card_category']
+    essential = ['name', 'set_code', 'collector_number', 'color', 'quantity', 'card_category']
     
     # Filter dynamic columns: keep if they have at least one non-empty/non-null value
     active_cols = [col for col in cols_to_show if col in essential or 
