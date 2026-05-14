@@ -37,20 +37,33 @@ def load_data():
     conn.close()
     return df
 
+def get_split_subtypes(df):
+    if df.empty or 'subtypes' not in df.columns:
+        return []
+    unique_subs = set()
+    for s_str in df['subtypes'].dropna():
+        parts = [p.strip() for p in str(s_str).split(',')]
+        unique_subs.update(parts)
+    return sorted([s for s in unique_subs if s])
+
 def add_card(data):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id, quantity FROM cards WHERE name=? AND card_category=?", (data['name'], data['card_category']))
     result = cursor.fetchone()
+    row_id = None
     if result:
-        cursor.execute("UPDATE cards SET quantity=? WHERE id=?", (result[1] + data['quantity'], result[0]))
+        row_id = result[0]
+        cursor.execute("UPDATE cards SET quantity=? WHERE id=?", (result[1] + data['quantity'], row_id))
     else:
         cursor.execute("""
             INSERT INTO cards (name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty) 
             VALUES (:name, :color, :quantity, :card_category, :mana_cost, :power_toughness, :subtypes, :keywords, :ability, :loyalty)
         """, data)
+        row_id = cursor.lastrowid
     conn.commit()
     conn.close()
+    return row_id
 
 def delete_card(card_id):
     conn = get_connection()
@@ -74,7 +87,46 @@ def export_to_excel(df, colors):
 st.set_page_config(page_title="MTG Collection Manager", layout="wide")
 create_table()
 
+# Initialize Session State
+if 'session_active' not in st.session_state:
+    st.session_state.session_active = False
+if 'session_card_ids' not in st.session_state:
+    st.session_state.session_card_ids = set()
+if 'highlight_session' not in st.session_state:
+    st.session_state.highlight_session = False
+
 st.title("🎴 MTG Card Collection Manager")
+
+# Session Manager Section
+st.header("Session Manager")
+s_col1, s_col2, s_col3, s_col4 = st.columns(4)
+
+with s_col1:
+    status_color = "green" if st.session_state.session_active else "red"
+    st.markdown(f"**Status:** :{status_color}[{'Active' if st.session_state.session_active else 'Inactive'}]")
+
+with s_col2:
+    if not st.session_state.session_active:
+        if st.button("Start Session", use_container_width=True):
+            st.session_state.session_active = True
+            st.session_state.session_card_ids = set()
+            st.rerun()
+    else:
+        if st.button("End Session", use_container_width=True):
+            count = len(st.session_state.session_card_ids)
+            st.session_state.session_active = False
+            st.info(f"Session ended. {count} cards were added/modified.")
+            st.rerun()
+
+with s_col3:
+    if st.button("Highlight Session Cards", use_container_width=True):
+        st.session_state.highlight_session = True
+        if not st.session_state.session_card_ids:
+            st.warning("No cards in current/last session to highlight.")
+
+with s_col4:
+    if st.button("Unhighlight Cards", use_container_width=True):
+        st.session_state.highlight_session = False
 
 # Sidebar - Add Card
 st.sidebar.header("Add New Card")
@@ -104,8 +156,11 @@ with st.sidebar.form("add_card_form", clear_on_submit=True):
                 "subtypes": subtypes, "keywords": keywords, "ability": ability,
                 "loyalty": int(loyalty) if loyalty.isdigit() else None
             }
-            add_card(new_card)
+            row_id = add_card(new_card)
+            if st.session_state.session_active and row_id:
+                st.session_state.session_card_ids.add(row_id)
             st.success(f"Added {name}!")
+            st.rerun()
         else:
             st.error("Card Name is required.")
 
@@ -114,23 +169,54 @@ df = load_data()
 
 # Filters
 st.header("Collection Browser")
-col1, col2, col3 = st.columns(3)
-with col1:
-    f_color = st.multiselect("Filter by Color", df['color'].unique() if not df.empty else [])
-with col2:
-    f_cat = st.multiselect("Filter by Category", df['card_category'].unique() if not df.empty else [])
-with col3:
-    search = st.text_input("Search Name")
+f_col1, f_col2, f_col3, f_col4 = st.columns(4)
+
+with f_col1:
+    f_color = st.multiselect("Colors", ["White", "Blue", "Black", "Red", "Green", "Colorless", "Multicolor"])
+with f_col2:
+    f_cat = st.multiselect("Categories", [
+        "Land", "Legendary Creature", "Creature", "Instant", "Sorcery",
+        "Legendary Enchantment", "Enchantment", "Planeswalker",
+        "Legendary Artifact", "Artifact", "Artifact Equipment",
+        "Artifact Vehicle", "Artifact Creature", "Artifact Treasure"
+    ])
+with f_col3:
+    all_costs = sorted(df['mana_cost'].dropna().unique()) if not df.empty else []
+    f_cost = st.multiselect("Costs", all_costs)
+with f_col4:
+    all_subs = get_split_subtypes(df)
+    f_sub = st.multiselect("Subtypes", all_subs)
+
+search = st.text_input("Search Name")
 
 filtered_df = df.copy()
 if f_color:
-    filtered_df = filtered_df[filtered_df['color'].isin(f_color)]
+    # Use OR logic for colors (LIKE %color%)
+    color_mask = filtered_df['color'].apply(lambda x: any(c in str(x) for c in f_color))
+    filtered_df = filtered_df[color_mask]
 if f_cat:
     filtered_df = filtered_df[filtered_df['card_category'].isin(f_cat)]
+if f_cost:
+    filtered_df = filtered_df[filtered_df['mana_cost'].isin(f_cost)]
+if f_sub:
+    # Use LIKE logic for subtypes
+    sub_mask = filtered_df['subtypes'].apply(lambda x: any(s in str(x) for s in f_sub))
+    filtered_df = filtered_df[sub_mask]
 if search:
     filtered_df = filtered_df[filtered_df['name'].str.contains(search, case=False)]
 
-st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+# Styling for Highlighting
+def highlight_rows(row):
+    if st.session_state.highlight_session and row.id in st.session_state.session_card_ids:
+        return ['background-color: #FFFF99'] * len(row)
+    return [''] * len(row)
+
+if not filtered_df.empty:
+    styled_df = filtered_df.style.apply(highlight_rows, axis=1)
+    # Hide ID column from view
+    st.dataframe(styled_df, use_container_width=True, hide_index=True, column_order=[col for col in filtered_df.columns if col != 'id'])
+else:
+    st.info("No cards match your filters.")
 
 # Export and Actions
 if not df.empty:
