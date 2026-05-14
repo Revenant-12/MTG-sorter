@@ -225,9 +225,18 @@ def highlight_rows(row):
     return [''] * len(row)
 
 if not filtered_df.empty:
+    # Dynamically hide columns that are entirely empty in the current view
+    cols_to_show = [col for col in filtered_df.columns if col != 'id']
+    
+    # Essential columns we always want to see
+    essential = ['name', 'color', 'quantity', 'card_category']
+    
+    # Filter dynamic columns: keep if they have at least one non-empty/non-null value
+    active_cols = [col for col in cols_to_show if col in essential or 
+                   filtered_df[col].apply(lambda x: str(x).strip() not in ['', 'None', 'nan'] if x is not None else False).any()]
+    
     styled_df = filtered_df.style.apply(highlight_rows, axis=1)
-    # Hide ID column from view
-    st.dataframe(styled_df, use_container_width=True, hide_index=True, column_order=[col for col in filtered_df.columns if col != 'id'])
+    st.dataframe(styled_df, use_container_width=True, hide_index=True, column_order=active_cols)
 else:
     st.info("No cards match your filters.")
 
