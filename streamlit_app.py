@@ -130,22 +130,35 @@ with s_col4:
 
 # Sidebar - Add Card
 st.sidebar.header("Add New Card")
+category = st.sidebar.selectbox("Category", [
+    "Land", "Legendary Creature", "Creature", "Instant", "Sorcery",
+    "Legendary Enchantment", "Enchantment", "Planeswalker",
+    "Legendary Artifact", "Artifact", "Artifact Equipment",
+    "Artifact Vehicle", "Artifact Creature", "Artifact Treasure"
+])
+
+# Logic for visibility based on category
+show = {"mana": True, "pt": False, "sub": False, "key": False, "ab": True, "loy": False}
+if category == "Land":
+    show["mana"] = False
+elif "Creature" in category or "Vehicle" in category:
+    show["pt"] = True
+    show["sub"] = True
+    show["key"] = True
+elif category == "Planeswalker":
+    show["loy"] = True
+
 with st.sidebar.form("add_card_form", clear_on_submit=True):
     name = st.text_input("Card Name")
     color = st.selectbox("Color", ["White", "Blue", "Black", "Red", "Green", "Colorless", "Multicolor"])
     quantity = st.number_input("Quantity", min_value=1, value=1)
-    category = st.selectbox("Category", [
-        "Land", "Legendary Creature", "Creature", "Instant", "Sorcery",
-        "Legendary Enchantment", "Enchantment", "Planeswalker",
-        "Legendary Artifact", "Artifact", "Artifact Equipment",
-        "Artifact Vehicle", "Artifact Creature", "Artifact Treasure"
-    ])
-    mana_cost = st.text_input("Mana Cost")
-    pt = st.text_input("P/T")
-    subtypes = st.text_input("Subtypes")
-    keywords = st.text_input("Keywords")
-    ability = st.text_area("Ability")
-    loyalty = st.text_input("Loyalty")
+    
+    mana_cost = st.text_input("Mana Cost") if show["mana"] else ""
+    pt = st.text_input("P/T") if show["pt"] else ""
+    subtypes = st.text_input("Subtypes") if show["sub"] else ""
+    keywords = st.text_input("Keywords") if show["key"] else ""
+    ability = st.text_area("Ability") if show["ab"] else ""
+    loyalty = st.text_input("Loyalty") if show["loy"] else ""
 
     submitted = st.form_submit_button("Add Card")
     if submitted:
