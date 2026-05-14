@@ -117,6 +117,8 @@ class MTGCardManager:
         self.var_keywords = tk.StringVar()
         self.var_ability = tk.StringVar()
         self.var_loyalty = tk.StringVar()
+        self.var_set_code = tk.StringVar()
+        self.var_collector_num = tk.StringVar()
         self.editing_card_id = None 
 
         self.card_types = [
@@ -146,9 +148,18 @@ class MTGCardManager:
                 keywords TEXT,
                 ability TEXT,
                 loyalty INTEGER,
-                UNIQUE(name, card_category)
+                set_code TEXT,
+                collector_number TEXT,
+                UNIQUE(name, card_category, set_code, collector_number)
             )
         """)
+        # Migration for existing tables
+        try:
+            cursor.execute("ALTER TABLE cards ADD COLUMN set_code TEXT")
+        except sqlite3.OperationalError: pass
+        try:
+            cursor.execute("ALTER TABLE cards ADD COLUMN collector_number TEXT")
+        except sqlite3.OperationalError: pass
         self.conn.commit()
 
     def get_distinct_values(self, column):
