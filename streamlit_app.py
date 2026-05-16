@@ -76,6 +76,25 @@ def add_card(data):
     conn.close()
     return row_id
 
+def update_card(card_id, data):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE cards SET 
+            name=?, color=?, quantity=?, card_category=?, 
+            mana_cost=?, power_toughness=?, subtypes=?, 
+            keywords=?, ability=?, loyalty=?, 
+            set_code=?, collector_number=? 
+        WHERE id=?
+    """, (
+        data['name'], data['color'], data['quantity'], data['card_category'],
+        data['mana_cost'], data['power_toughness'], data['subtypes'],
+        data['keywords'], data['ability'], data['loyalty'],
+        data['set_code'], data['collector_number'], card_id
+    ))
+    conn.commit()
+    conn.close()
+
 def delete_card(card_id):
     conn = get_connection()
     cursor = conn.cursor()
@@ -105,6 +124,10 @@ if 'session_card_ids' not in st.session_state:
     st.session_state.session_card_ids = set()
 if 'highlight_session' not in st.session_state:
     st.session_state.highlight_session = False
+if 'editing_id' not in st.session_state:
+    st.session_state.editing_id = None
+if 'selected_card' not in st.session_state:
+    st.session_state.selected_card = None
 
 st.title("🎴 MTG Card Collection Manager")
 
@@ -139,14 +162,32 @@ with s_col4:
     if st.button("Unhighlight Cards", use_container_width=True):
         st.session_state.highlight_session = False
 
-# Sidebar - Add Card
-st.sidebar.header("Add New Card")
-category = st.sidebar.selectbox("Category", [
+# Sidebar - Add/Edit Card
+if st.session_state.editing_id:
+    st.sidebar.header(f"Editing: {st.session_state.selected_card['name']}")
+    if st.sidebar.button("Cancel Edit"):
+        st.session_state.editing_id = None
+        st.session_state.selected_card = None
+        st.rerun()
+else:
+    st.sidebar.header("Add New Card")
+
+# Category selection
+card_types = [
     "Land", "Legendary Creature", "Creature", "Instant", "Sorcery",
     "Legendary Enchantment", "Enchantment", "Planeswalker",
     "Legendary Artifact", "Artifact", "Artifact Equipment",
     "Artifact Vehicle", "Artifact Creature", "Artifact Treasure"
-])
+]
+
+default_cat = "Land"
+if st.session_state.selected_card:
+    try:
+        default_cat = st.session_state.selected_card['card_category']
+    except: pass
+
+category = st.sidebar.selectbox("Category", card_types, 
+                               index=card_types.index(default_cat) if default_cat in card_types else 0)
 
 # Logic for visibility based on category
 show = {"mana": True, "pt": False, "sub": False, "key": False, "ab": True, "loy": False}
@@ -159,39 +200,60 @@ elif "Creature" in category or "Vehicle" in category:
 elif category == "Planeswalker":
     show["loy"] = True
 
-with st.sidebar.form("add_card_form", clear_on_submit=True):
-    name = st.text_input("Card Name")
+with st.sidebar.form("card_form", clear_on_submit=(not st.session_state.editing_id)):
+    def get_val(key, default=""):
+        if st.session_state.selected_card and key in st.session_state.selected_card:
+            val = st.session_state.selected_card[key]
+            return val if val is not None and str(val) != 'nan' else default
+        return default
+
+    name = st.text_input("Card Name", value=get_val('name'))
     col_set1, col_set2 = st.columns(2)
     with col_set1:
-        set_code = st.text_input("Set Code", help="e.g. SNC, M21")
+        set_code = st.text_input("Set Code", value=get_val('set_code'), help="e.g. SNC, M21")
     with col_set2:
-        collector_num = st.text_input("Collector #", help="Card number in set")
+        collector_num = st.text_input("Collector #", value=get_val('collector_number'), help="Card number in set")
     
-    color = st.selectbox("Color", ["White", "Blue", "Black", "Red", "Green", "Colorless", "Multicolor"])
-    quantity = st.number_input("Quantity", min_value=1, value=1)
+    colors_list = ["White", "Blue", "Black", "Red", "Green", "Colorless", "Multicolor"]
+    current_color = get_val('color', 'White')
+    color = st.selectbox("Color", colors_list, 
+                        index=colors_list.index(current_color) if current_color in colors_list else 0)
     
-    mana_cost = st.text_input("Mana Cost") if show["mana"] else ""
-    pt = st.text_input("P/T") if show["pt"] else ""
-    subtypes = st.text_input("Subtypes") if show["sub"] else ""
-    keywords = st.text_input("Keywords") if show["key"] else ""
-    ability = st.text_area("Ability") if show["ab"] else ""
-    loyalty = st.text_input("Loyalty") if show["loy"] else ""
+    quantity = st.number_input("Quantity", min_value=1, value=int(get_val('quantity', 1)))
+    
+    mana_cost = st.text_input("Mana Cost", value=get_val('mana_cost')) if show["mana"] else ""
+    pt = st.text_input("P/T", value=get_val('power_toughness')) if show["pt"] else ""
+    subtypes = st.text_input("Subtypes", value=get_val('subtypes')) if show["sub"] else ""
+    keywords = st.text_input("Keywords", value=get_val('keywords')) if show["key"] else ""
+    ability = st.text_area("Ability", value=get_val('ability')) if show["ab"] else ""
+    loyalty_val = get_val('loyalty', "")
+    loyalty = st.text_input("Loyalty", value=str(loyalty_val) if loyalty_val else "") if show["loy"] else ""
 
-    submitted = st.form_submit_button("Add Card")
+    submit_label = "Save Changes" if st.session_state.editing_id else "Add Card"
+    submitted = st.form_submit_button(submit_label)
+    
     if submitted:
         if name:
-            new_card = {
+            card_data = {
                 "name": name, "color": color, "quantity": quantity,
                 "card_category": category, "mana_cost": mana_cost, "power_toughness": pt,
                 "subtypes": subtypes, "keywords": keywords, "ability": ability,
-                "loyalty": int(loyalty) if loyalty.isdigit() else None,
+                "loyalty": int(loyalty) if (loyalty and str(loyalty).isdigit()) else None,
                 "set_code": set_code.strip().upper(),
                 "collector_number": collector_num.strip()
             }
-            row_id = add_card(new_card)
-            if st.session_state.session_active and row_id:
-                st.session_state.session_card_ids.add(row_id)
-            st.success(f"Added {name}!")
+            
+            if st.session_state.editing_id:
+                update_card(st.session_state.editing_id, card_data)
+                st.success(f"Updated {name}!")
+                st.session_state.editing_id = None
+                st.session_state.selected_card = None
+            else:
+                row_id = add_card(card_data)
+                if st.session_state.session_active and row_id:
+                    st.session_state.session_card_ids.add(row_id)
+                st.success(f"Added {name}!")
+            
             st.rerun()
         else:
             st.error("Card Name is required.")
@@ -201,17 +263,13 @@ df = load_data()
 
 # Filters
 st.header("Collection Browser")
+st.caption("Select a row to edit its details in the sidebar.")
 f_col1, f_col2, f_col3, f_col4 = st.columns(4)
 
 with f_col1:
     f_color = st.multiselect("Colors", ["White", "Blue", "Black", "Red", "Green", "Colorless", "Multicolor"])
 with f_col2:
-    f_cat = st.multiselect("Categories", [
-        "Land", "Legendary Creature", "Creature", "Instant", "Sorcery",
-        "Legendary Enchantment", "Enchantment", "Planeswalker",
-        "Legendary Artifact", "Artifact", "Artifact Equipment",
-        "Artifact Vehicle", "Artifact Creature", "Artifact Treasure"
-    ])
+    f_cat = st.multiselect("Categories", card_types)
 with f_col3:
     all_costs = sorted(df['mana_cost'].dropna().unique()) if not df.empty else []
     f_cost = st.multiselect("Costs", all_costs)
@@ -223,7 +281,6 @@ search = st.text_input("Search Name")
 
 filtered_df = df.copy()
 if f_color:
-    # Use OR logic for colors (LIKE %color%)
     color_mask = filtered_df['color'].apply(lambda x: any(c in str(x) for c in f_color))
     filtered_df = filtered_df[color_mask]
 if f_cat:
@@ -231,7 +288,6 @@ if f_cat:
 if f_cost:
     filtered_df = filtered_df[filtered_df['mana_cost'].isin(f_cost)]
 if f_sub:
-    # Use LIKE logic for subtypes
     sub_mask = filtered_df['subtypes'].apply(lambda x: any(s in str(x) for s in f_sub))
     filtered_df = filtered_df[sub_mask]
 if search:
@@ -244,18 +300,32 @@ def highlight_rows(row):
     return [''] * len(row)
 
 if not filtered_df.empty:
-    # Dynamically hide columns that are entirely empty in the current view
     cols_to_show = [col for col in filtered_df.columns if col != 'id']
-    
-    # Essential columns we always want to see
     essential = ['name', 'set_code', 'collector_number', 'color', 'quantity', 'card_category']
-    
-    # Filter dynamic columns: keep if they have at least one non-empty/non-null value
     active_cols = [col for col in cols_to_show if col in essential or 
                    filtered_df[col].apply(lambda x: str(x).strip() not in ['', 'None', 'nan'] if x is not None else False).any()]
     
     styled_df = filtered_df.style.apply(highlight_rows, axis=1)
-    st.dataframe(styled_df, use_container_width=True, hide_index=True, column_order=active_cols)
+    
+    # Enable row selection
+    selection = st.dataframe(
+        styled_df, 
+        use_container_width=True, 
+        hide_index=True, 
+        column_order=active_cols,
+        on_select="rerun",
+        selection_mode="single_row"
+    )
+
+    # Check for selection
+    if selection and "selection" in selection and selection["selection"]["rows"]:
+        selected_row_idx = selection["selection"]["rows"][0]
+        selected_card = filtered_df.iloc[selected_row_idx]
+        if st.session_state.editing_id != int(selected_card.id):
+            st.session_state.editing_id = int(selected_card.id)
+            st.session_state.selected_card = selected_card.to_dict()
+            st.rerun()
+
 else:
     st.info("No cards match your filters.")
 
@@ -276,11 +346,15 @@ if not df.empty:
     with col_del:
         with st.expander("🗑️ Delete a Card"):
             card_to_delete = st.selectbox("Select Card to Delete", df['name'].unique())
-            cat_to_delete = st.selectbox("Select Category for Deletion", df[df['name'] == card_to_delete]['card_category'].unique())
+            card_instances = df[df['name'] == card_to_delete]
+            instance_labels = [f"{row.set_code or '??'} - {row.collector_number or '??'} ({row.card_category})" for _, row in card_instances.iterrows()]
+            instance_to_delete = st.selectbox("Select specific version to delete", instance_labels)
+            
             if st.button("Confirm Delete", type="primary"):
-                card_id = df[(df['name'] == card_to_delete) & (df['card_category'] == cat_to_delete)]['id'].values[0]
-                delete_card(card_id)
-                st.warning(f"Deleted {card_to_delete} ({cat_to_delete})")
+                idx = instance_labels.index(instance_to_delete)
+                card_id = card_instances.iloc[idx]['id']
+                delete_card(int(card_id))
+                st.warning(f"Deleted {card_to_delete} version!")
                 st.rerun()
 
 else:
