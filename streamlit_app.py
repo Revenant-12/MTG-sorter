@@ -314,7 +314,7 @@ if not filtered_df.empty:
         hide_index=True, 
         column_order=active_cols,
         on_select="rerun",
-        selection_mode="single_row"
+        selection_mode="single-row"
     )
 
     # Check for selection
