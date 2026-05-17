@@ -108,7 +108,13 @@ def export_to_excel(df, colors):
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, sheet_name='Master List', index=False)
         for color in colors:
-            color_df = df[df['color'] == color]
+            if color == "Multicolor":
+                # Match anything with '/' OR explicitly 'Multicolor'
+                color_df = df[df['color'].str.contains('/', na=False) | (df['color'] == 'Multicolor')]
+            else:
+                # Match exact or as part of a list
+                color_df = df[df['color'].apply(lambda x: color == x or (isinstance(x, str) and color in x.split('/')))]
+            
             if not color_df.empty:
                 color_df.to_excel(writer, sheet_name=color, index=False)
     return output.getvalue()
@@ -217,9 +223,17 @@ with st.sidebar.form("card_form", clear_on_submit=(not st.session_state.editing_
         collector_num = st.text_input("Collector #", value=get_val('collector_number'), help="Card number in set")
     
     colors_list = ["White", "Blue", "Black", "Red", "Green", "Colorless", "Multicolor"]
-    current_color = get_val('color', 'White')
-    color = st.selectbox("Color", colors_list, 
-                        index=colors_list.index(current_color) if current_color in colors_list else 0)
+    current_color_str = get_val('color', 'White')
+    
+    # Interpret "color/color" as multiselected
+    if isinstance(current_color_str, str) and "/" in current_color_str:
+        default_colors = [c.strip() for c in current_color_str.split("/")]
+    elif current_color_str in colors_list:
+        default_colors = [current_color_str]
+    else:
+        default_colors = ["White"]
+        
+    color = st.multiselect("Color", colors_list, default=default_colors)
     
     quantity = st.number_input("Quantity", min_value=1, value=int(get_val('quantity', 1)))
     
@@ -238,8 +252,10 @@ with st.sidebar.form("card_form", clear_on_submit=(not st.session_state.editing_
         if name:
             s_code = set_code.strip().upper()
             c_num = collector_num.strip()
+            # Join selected colors with '/'
+            color_to_save = "/".join(color) if color else "Colorless"
             card_data = {
-                "name": name, "color": color, "quantity": quantity,
+                "name": name, "color": color_to_save, "quantity": quantity,
                 "card_category": category, "mana_cost": mana_cost, "power_toughness": pt,
                 "subtypes": subtypes, "keywords": keywords, "ability": ability,
                 "loyalty": int(loyalty) if (loyalty and str(loyalty).isdigit()) else None,
@@ -285,6 +301,7 @@ search = st.text_input("Search Name", key="filter_search")
 
 filtered_df = df.copy()
 if f_color:
+    # Improved color filtering for multiselect
     color_mask = filtered_df['color'].apply(lambda x: any(c in str(x) for c in f_color))
     filtered_df = filtered_df[color_mask]
 if f_cat:
