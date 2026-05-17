@@ -59,7 +59,7 @@ def get_split_subtypes(df):
 def add_card(data):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, quantity FROM cards WHERE name=? AND card_category=? AND set_code=? AND collector_number=?", 
+    cursor.execute("SELECT id, quantity FROM cards WHERE name=? AND card_category=? AND set_code IS ? AND collector_number IS ?", 
                   (data['name'], data['card_category'], data.get('set_code'), data.get('collector_number')))
     result = cursor.fetchone()
     row_id = None
