@@ -234,13 +234,15 @@ with st.sidebar.form("card_form", clear_on_submit=(not st.session_state.editing_
     
     if submitted:
         if name:
+            s_code = set_code.strip().upper()
+            c_num = collector_num.strip()
             card_data = {
                 "name": name, "color": color, "quantity": quantity,
                 "card_category": category, "mana_cost": mana_cost, "power_toughness": pt,
                 "subtypes": subtypes, "keywords": keywords, "ability": ability,
                 "loyalty": int(loyalty) if (loyalty and str(loyalty).isdigit()) else None,
-                "set_code": set_code.strip().upper(),
-                "collector_number": collector_num.strip()
+                "set_code": s_code if s_code else None,
+                "collector_number": c_num if c_num else None
             }
             
             if st.session_state.editing_id:

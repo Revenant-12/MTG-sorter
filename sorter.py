@@ -401,12 +401,14 @@ class MTGCardManager:
             messagebox.showerror("Error", "Name/Category required.")
             return
 
+        s_code = self.var_set_code.get().strip().upper()
+        c_num = self.var_collector_num.get().strip()
         data = {
             "name": name, "color": self.var_color.get(), "quantity": self.var_quantity.get(),
             "card_category": cat, "mana_cost": self.var_mana_cost.get(), "power_toughness": self.var_pt.get(),
             "subtypes": self.var_subtypes.get(), "keywords": self.var_keywords.get(),
             "ability": self.var_ability.get(), "loyalty": self.var_loyalty.get() if self.var_loyalty.get() else None,
-            "set_code": self.var_set_code.get().strip().upper(), "collector_number": self.var_collector_num.get().strip()
+            "set_code": s_code if s_code else None, "collector_number": c_num if c_num else None
         }
         
         self.upsert_card(data)
