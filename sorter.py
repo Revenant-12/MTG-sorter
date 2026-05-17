@@ -414,8 +414,30 @@ class MTGCardManager:
         self.upsert_card(data)
         self.conn.commit()
         self.refresh_dropdowns()
-        self.load_all_cards()
+        self.refresh_ui()
         self.clear_form()
+
+    def refresh_ui(self):
+        # Refresh color tabs with all cards, keep master tab filter intact
+        for main_cat in self.tree_dict:
+            if main_cat != "Master":
+                for sub_cat in self.tree_dict[main_cat]:
+                    self.tree_dict[main_cat][sub_cat].delete(*self.tree_dict[main_cat][sub_cat].get_children())
+        
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id, name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number FROM cards ORDER BY name ASC")
+        all_rows = cursor.fetchall()
+        for row in all_rows:
+            self.insert_row_to_ui(row, skip_master=True)
+
+        # Apply search if filters are active, otherwise load all to master
+        if (self.filter_color.get_selected() or self.filter_cat.get_selected() or 
+            self.filter_cost.get_selected() or self.filter_sub.get_selected()):
+            self.search_master()
+        else:
+            self.tree_dict["Master"]["All"].delete(*self.tree_dict["Master"]["All"].get_children())
+            for row in all_rows:
+                self.insert_row_to_ui(row, master_only=True)
 
     def load_all_cards(self):
         for main_cat in self.tree_dict:
@@ -427,7 +449,7 @@ class MTGCardManager:
         for row in cursor.fetchall():
             self.insert_row_to_ui(row)
 
-    def insert_row_to_ui(self, row):
+    def insert_row_to_ui(self, row, master_only=False, skip_master=False):
         row_id, name, color_str, cat = row[0], row[1], str(row[2]) if row[2] else "Colorless", row[4]
         display = self.clean_row(row) 
         
@@ -439,8 +461,12 @@ class MTGCardManager:
             tree_widget.insert("", "end", iid=row_id, values=display, tags=row_tags)
 
         # 1. Master List
-        insert_striped(self.tree_dict["Master"]["All"])
+        if not skip_master:
+            insert_striped(self.tree_dict["Master"]["All"])
         
+        if master_only:
+            return
+            
         # 2. Colors
         dest_colors = []
         standard = ["White", "Blue", "Black", "Red", "Green"]
@@ -515,14 +541,18 @@ class MTGCardManager:
         cursor = self.conn.cursor()
         cursor.execute(query, params)
         for row in cursor.fetchall():
-            self.insert_row_to_ui(row)
+            self.insert_row_to_ui(row, master_only=True)
 
     def clear_search(self):
         self.filter_color.clear_selection()
         self.filter_cat.clear_selection()
         self.filter_cost.clear_selection()
         self.filter_sub.clear_selection()
-        self.load_all_cards()
+        self.tree_dict["Master"]["All"].delete(*self.tree_dict["Master"]["All"].get_children())
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id, name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number FROM cards ORDER BY name ASC")
+        for row in cursor.fetchall():
+            self.insert_row_to_ui(row, master_only=True)
 
     def update_fields_visibility(self, event=None):
         for w in self.dynamic_frame.winfo_children(): w.grid_forget()
@@ -591,7 +621,7 @@ class MTGCardManager:
             if self.session_active: self.session_card_ids.add(self.editing_card_id)
 
             self.refresh_dropdowns()
-            self.load_all_cards()
+            self.refresh_ui()
             self.clear_form()
         except Exception as e:
             messagebox.showerror("Error", str(e))
@@ -602,7 +632,7 @@ class MTGCardManager:
             self.conn.execute("DELETE FROM cards WHERE id=?", (self.editing_card_id,))
             self.conn.commit()
             self.refresh_dropdowns()
-            self.load_all_cards()
+            self.refresh_ui()
             self.clear_form()
 
     def on_file_drop(self, event):
@@ -612,7 +642,7 @@ class MTGCardManager:
             self.process_excel_file(file_path)
             self.conn.commit()
             self.refresh_dropdowns()
-            self.load_all_cards()
+            self.refresh_ui()
             messagebox.showinfo("Import Successful", f"Imported: {os.path.basename(file_path)}")
         else: messagebox.showerror("Error", "Please drop a valid Excel file (.xlsx, .xls)")
 

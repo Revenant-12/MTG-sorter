@@ -128,6 +128,8 @@ if 'editing_id' not in st.session_state:
     st.session_state.editing_id = None
 if 'selected_card' not in st.session_state:
     st.session_state.selected_card = None
+if 'should_rerun' not in st.session_state:
+    st.session_state.should_rerun = False
 
 st.title("🎴 MTG Card Collection Manager")
 
@@ -144,13 +146,13 @@ with s_col2:
         if st.button("Start Session", use_container_width=True):
             st.session_state.session_active = True
             st.session_state.session_card_ids = set()
-            st.rerun()
+            st.session_state.should_rerun = True
     else:
         if st.button("End Session", use_container_width=True):
             count = len(st.session_state.session_card_ids)
             st.session_state.session_active = False
             st.info(f"Session ended. {count} cards were added/modified.")
-            st.rerun()
+            st.session_state.should_rerun = True
 
 with s_col3:
     if st.button("Highlight Session Cards", use_container_width=True):
@@ -168,7 +170,7 @@ if st.session_state.editing_id:
     if st.sidebar.button("Cancel Edit"):
         st.session_state.editing_id = None
         st.session_state.selected_card = None
-        st.rerun()
+        st.session_state.should_rerun = True
 else:
     st.sidebar.header("Add New Card")
 
@@ -256,7 +258,7 @@ with st.sidebar.form("card_form", clear_on_submit=(not st.session_state.editing_
                     st.session_state.session_card_ids.add(row_id)
                 st.success(f"Added {name}!")
             
-            st.rerun()
+            st.session_state.should_rerun = True
         else:
             st.error("Card Name is required.")
 
@@ -269,17 +271,17 @@ st.caption("Select a row to edit its details in the sidebar.")
 f_col1, f_col2, f_col3, f_col4 = st.columns(4)
 
 with f_col1:
-    f_color = st.multiselect("Colors", ["White", "Blue", "Black", "Red", "Green", "Colorless", "Multicolor"])
+    f_color = st.multiselect("Colors", ["White", "Blue", "Black", "Red", "Green", "Colorless", "Multicolor"], key="filter_color")
 with f_col2:
-    f_cat = st.multiselect("Categories", card_types)
+    f_cat = st.multiselect("Categories", card_types, key="filter_cat")
 with f_col3:
     all_costs = sorted(df['mana_cost'].dropna().unique()) if not df.empty else []
-    f_cost = st.multiselect("Costs", all_costs)
+    f_cost = st.multiselect("Costs", all_costs, key="filter_cost")
 with f_col4:
     all_subs = get_split_subtypes(df)
-    f_sub = st.multiselect("Subtypes", all_subs)
+    f_sub = st.multiselect("Subtypes", all_subs, key="filter_sub")
 
-search = st.text_input("Search Name")
+search = st.text_input("Search Name", key="filter_search")
 
 filtered_df = df.copy()
 if f_color:
@@ -326,7 +328,7 @@ if not filtered_df.empty:
         if st.session_state.editing_id != int(selected_card.id):
             st.session_state.editing_id = int(selected_card.id)
             st.session_state.selected_card = selected_card.to_dict()
-            st.rerun()
+            st.session_state.should_rerun = True
 
 else:
     st.info("No cards match your filters.")
@@ -357,10 +359,14 @@ if not df.empty:
                 card_id = card_instances.iloc[idx]['id']
                 delete_card(int(card_id))
                 st.warning(f"Deleted {card_to_delete} version!")
-                st.rerun()
+                st.session_state.should_rerun = True
 
 else:
     st.info("Your collection is currently empty. Add some cards in the sidebar!")
 
 st.markdown("---")
 st.caption("Tip: To use this 'from anywhere', host this code on GitHub and connect it to [Streamlit Cloud](https://streamlit.io/cloud).")
+
+if st.session_state.should_rerun:
+    st.session_state.should_rerun = False
+    st.rerun()
