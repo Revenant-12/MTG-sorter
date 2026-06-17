@@ -7,7 +7,9 @@ import os
 DB_FILE = "mtg_collection.db"
 
 def get_connection():
-    return sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn.isolation_level = None  # Enable autocommit mode
+    return conn
 
 def create_table():
     conn = get_connection()
@@ -27,6 +29,7 @@ def create_table():
             loyalty INTEGER,
             set_code TEXT,
             collector_number TEXT,
+            collection_id TEXT,
             UNIQUE(name, card_category, set_code, collector_number)
         )
     """)
@@ -36,6 +39,9 @@ def create_table():
     except sqlite3.OperationalError: pass
     try:
         cursor.execute("ALTER TABLE cards ADD COLUMN collector_number TEXT")
+    except sqlite3.OperationalError: pass
+    try:
+        cursor.execute("ALTER TABLE cards ADD COLUMN collection_id TEXT")
     except sqlite3.OperationalError: pass
     
     conn.commit()
@@ -68,11 +74,10 @@ def add_card(data):
         cursor.execute("UPDATE cards SET quantity=? WHERE id=?", (result[1] + data['quantity'], row_id))
     else:
         cursor.execute("""
-            INSERT INTO cards (name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number) 
-            VALUES (:name, :color, :quantity, :card_category, :mana_cost, :power_toughness, :subtypes, :keywords, :ability, :loyalty, :set_code, :collector_number)
-        """, data)
+            INSERT INTO cards (name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number, collection_id) 
+            VALUES (:name, :color, :quantity, :card_category, :mana_cost, :power_toughness, :subtypes, :keywords, :ability, :loyalty, :set_code, :collector_number, :collection_id)
+        """, {**data, 'collection_id': None})
         row_id = cursor.lastrowid
-    conn.commit()
     conn.close()
     return row_id
 
@@ -84,15 +89,14 @@ def update_card(card_id, data):
             name=?, color=?, quantity=?, card_category=?, 
             mana_cost=?, power_toughness=?, subtypes=?, 
             keywords=?, ability=?, loyalty=?, 
-            set_code=?, collector_number=? 
+            set_code=?, collector_number=?, collection_id=? 
         WHERE id=?
     """, (
         data['name'], data['color'], data['quantity'], data['card_category'],
         data['mana_cost'], data['power_toughness'], data['subtypes'],
         data['keywords'], data['ability'], data['loyalty'],
-        data['set_code'], data['collector_number'], card_id
+        data['set_code'], data['collector_number'], data.get('collection_id'), card_id
     ))
-    conn.commit()
     conn.close()
 
 def delete_card(card_id):
@@ -237,6 +241,8 @@ with st.sidebar.form("card_form", clear_on_submit=(not st.session_state.editing_
     
     quantity = st.number_input("Quantity", min_value=1, value=int(get_val('quantity', 1)))
     
+    collection_id = st.text_input("Collection ID", value=get_val('collection_id'))
+    
     mana_cost = st.text_input("Mana Cost", value=get_val('mana_cost')) if show["mana"] else ""
     pt = st.text_input("P/T", value=get_val('power_toughness')) if show["pt"] else ""
     subtypes = st.text_input("Subtypes", value=get_val('subtypes')) if show["sub"] else ""
@@ -260,7 +266,8 @@ with st.sidebar.form("card_form", clear_on_submit=(not st.session_state.editing_
                 "subtypes": subtypes, "keywords": keywords, "ability": ability,
                 "loyalty": int(loyalty) if (loyalty and str(loyalty).isdigit()) else None,
                 "set_code": s_code if s_code else None,
-                "collector_number": c_num if c_num else None
+                "collector_number": c_num if c_num else None,
+                "collection_id": collection_id if collection_id else None
             }
             
             if st.session_state.editing_id:
