@@ -2,55 +2,104 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import os
+from sqlalchemy import create_engine, text
 
-# Database file location
+# Local fallback database file
 DB_FILE = "mtg_collection.db"
 
-def get_connection():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    conn.isolation_level = None  # Enable autocommit mode
-    return conn
+def get_db_engine():
+    """
+    Checks Streamlit secrets for PostgreSQL / Supabase credentials.
+    If found, returns a SQLAlchemy engine for Postgres.
+    Otherwise, returns a SQLAlchemy engine for local SQLite.
+    """
+    try:
+        url = None
+        if "DATABASE_URL" in st.secrets:
+            url = st.secrets["DATABASE_URL"]
+        elif "connections" in st.secrets and "postgresql" in st.secrets["connections"]:
+            c = st.secrets["connections"]["postgresql"]
+            if "url" in c:
+                url = c["url"]
+            else:
+                user = c.get("username", c.get("user", "postgres"))
+                password = c.get("password", "")
+                host = c.get("host", "localhost")
+                port = c.get("port", 5432)
+                dbname = c.get("database", c.get("dbname", "postgres"))
+                url = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+        elif "postgres" in st.secrets or "supabase" in st.secrets:
+            p = st.secrets.get("postgres") or st.secrets.get("supabase")
+            user = p.get("user", "postgres")
+            password = p.get("password", "")
+            host = p.get("host", "localhost")
+            port = p.get("port", 5432)
+            dbname = p.get("dbname", "postgres")
+            url = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+
+        if url:
+            if url.startswith("postgres://"):
+                url = url.replace("postgres://", "postgresql://", 1)
+            return create_engine(url, pool_pre_ping=True), "postgres"
+    except Exception:
+        pass
+
+    # Fallback to local SQLite engine
+    return create_engine(f"sqlite:///{DB_FILE}"), "sqlite"
+
+engine, db_type = get_db_engine()
 
 def create_table():
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS cards (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            color TEXT,
-            quantity INTEGER,
-            card_category TEXT,
-            mana_cost TEXT,
-            power_toughness TEXT,
-            subtypes TEXT,
-            keywords TEXT,
-            ability TEXT,
-            loyalty INTEGER,
-            set_code TEXT,
-            collector_number TEXT,
-            collection_id TEXT,
-            UNIQUE(name, card_category, set_code, collector_number)
-        )
-    """)
-    # Migration for existing tables
-    try:
-        cursor.execute("ALTER TABLE cards ADD COLUMN set_code TEXT")
-    except sqlite3.OperationalError: pass
-    try:
-        cursor.execute("ALTER TABLE cards ADD COLUMN collector_number TEXT")
-    except sqlite3.OperationalError: pass
-    try:
-        cursor.execute("ALTER TABLE cards ADD COLUMN collection_id TEXT")
-    except sqlite3.OperationalError: pass
-    
-    conn.commit()
-    conn.close()
+    with engine.begin() as conn:
+        if db_type == "postgres":
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS cards (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    color TEXT,
+                    quantity INTEGER,
+                    card_category TEXT,
+                    mana_cost TEXT,
+                    power_toughness TEXT,
+                    subtypes TEXT,
+                    keywords TEXT,
+                    ability TEXT,
+                    loyalty INTEGER,
+                    set_code TEXT,
+                    collector_number TEXT,
+                    collection_id TEXT,
+                    CONSTRAINT unique_card_instance UNIQUE(name, card_category, set_code, collector_number)
+                )
+            """))
+        else:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS cards (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    color TEXT,
+                    quantity INTEGER,
+                    card_category TEXT,
+                    mana_cost TEXT,
+                    power_toughness TEXT,
+                    subtypes TEXT,
+                    keywords TEXT,
+                    ability TEXT,
+                    loyalty INTEGER,
+                    set_code TEXT,
+                    collector_number TEXT,
+                    collection_id TEXT,
+                    UNIQUE(name, card_category, set_code, collector_number)
+                )
+            """))
+            for col_name in ["set_code", "collector_number", "collection_id"]:
+                try:
+                    conn.execute(text(f"ALTER TABLE cards ADD COLUMN {col_name} TEXT"))
+                except Exception:
+                    pass
 
 def load_data():
-    conn = get_connection()
-    df = pd.read_sql_query("SELECT * FROM cards ORDER BY name ASC", conn)
-    conn.close()
+    with engine.connect() as conn:
+        df = pd.read_sql_query(text("SELECT * FROM cards ORDER BY name ASC"), conn)
     return df
 
 def get_split_subtypes(df):
@@ -63,48 +112,89 @@ def get_split_subtypes(df):
     return sorted([s for s in unique_subs if s])
 
 def add_card(data):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, quantity FROM cards WHERE name=? AND card_category=? AND set_code IS ? AND collector_number IS ?", 
-                  (data['name'], data['card_category'], data.get('set_code'), data.get('collector_number')))
-    result = cursor.fetchone()
-    row_id = None
-    if result:
-        row_id = result[0]
-        cursor.execute("UPDATE cards SET quantity=? WHERE id=?", (result[1] + data['quantity'], row_id))
-    else:
-        cursor.execute("""
-            INSERT INTO cards (name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number, collection_id) 
-            VALUES (:name, :color, :quantity, :card_category, :mana_cost, :power_toughness, :subtypes, :keywords, :ability, :loyalty, :set_code, :collector_number, :collection_id)
-        """, {**data, 'collection_id': None})
-        row_id = cursor.lastrowid
-    conn.close()
-    return row_id
+    params = {
+        "name": data['name'],
+        "card_category": data['card_category'],
+        "set_code": data.get('set_code'),
+        "collector_number": data.get('collector_number')
+    }
+    
+    with engine.begin() as conn:
+        query_check = text("""
+            SELECT id, quantity FROM cards 
+            WHERE name = :name 
+              AND card_category = :card_category 
+              AND ((set_code = :set_code) OR (set_code IS NULL AND :set_code IS NULL)) 
+              AND ((collector_number = :collector_number) OR (collector_number IS NULL AND :collector_number IS NULL))
+        """)
+        result = conn.execute(query_check, params).fetchone()
+        
+        if result:
+            row_id, existing_qty = result[0], result[1]
+            new_qty = existing_qty + data['quantity']
+            conn.execute(text("UPDATE cards SET quantity = :quantity WHERE id = :id"), {"quantity": new_qty, "id": row_id})
+            return row_id
+        else:
+            insert_params = {
+                "name": data['name'],
+                "color": data['color'],
+                "quantity": data['quantity'],
+                "card_category": data['card_category'],
+                "mana_cost": data['mana_cost'],
+                "power_toughness": data['power_toughness'],
+                "subtypes": data['subtypes'],
+                "keywords": data['keywords'],
+                "ability": data['ability'],
+                "loyalty": data['loyalty'],
+                "set_code": data.get('set_code'),
+                "collector_number": data.get('collector_number'),
+                "collection_id": data.get('collection_id')
+            }
+            if db_type == "postgres":
+                res = conn.execute(text("""
+                    INSERT INTO cards (name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number, collection_id)
+                    VALUES (:name, :color, :quantity, :card_category, :mana_cost, :power_toughness, :subtypes, :keywords, :ability, :loyalty, :set_code, :collector_number, :collection_id)
+                    RETURNING id
+                """), insert_params)
+                row_id = res.fetchone()[0]
+            else:
+                res = conn.execute(text("""
+                    INSERT INTO cards (name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number, collection_id)
+                    VALUES (:name, :color, :quantity, :card_category, :mana_cost, :power_toughness, :subtypes, :keywords, :ability, :loyalty, :set_code, :collector_number, :collection_id)
+                """), insert_params)
+                row_id = res.lastrowid
+            return row_id
 
 def update_card(card_id, data):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE cards SET 
-            name=?, color=?, quantity=?, card_category=?, 
-            mana_cost=?, power_toughness=?, subtypes=?, 
-            keywords=?, ability=?, loyalty=?, 
-            set_code=?, collector_number=?, collection_id=? 
-        WHERE id=?
-    """, (
-        data['name'], data['color'], data['quantity'], data['card_category'],
-        data['mana_cost'], data['power_toughness'], data['subtypes'],
-        data['keywords'], data['ability'], data['loyalty'],
-        data['set_code'], data['collector_number'], data.get('collection_id'), card_id
-    ))
-    conn.close()
+    update_params = {
+        "id": card_id,
+        "name": data['name'],
+        "color": data['color'],
+        "quantity": data['quantity'],
+        "card_category": data['card_category'],
+        "mana_cost": data['mana_cost'],
+        "power_toughness": data['power_toughness'],
+        "subtypes": data['subtypes'],
+        "keywords": data['keywords'],
+        "ability": data['ability'],
+        "loyalty": data['loyalty'],
+        "set_code": data['set_code'],
+        "collector_number": data['collector_number'],
+        "collection_id": data.get('collection_id')
+    }
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE cards SET 
+                name = :name, color = :color, quantity = :quantity, card_category = :card_category, 
+                mana_cost = :mana_cost, power_toughness = :power_toughness, subtypes = :subtypes, 
+                keywords = :keywords, ability = :ability, loyalty = :loyalty, 
+                set_code = :set_code, collector_number = :collector_number, collection_id = :collection_id 
+            WHERE id = :id
+        """), update_params)
 
 def delete_card(card_id):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM cards WHERE id=?", (card_id,))
-    conn.commit()
-    conn.close()
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM cards WHERE id = :id"), {"id": card_id})
 
 def export_to_excel(df, colors):
     from io import BytesIO
@@ -113,10 +203,8 @@ def export_to_excel(df, colors):
         df.to_excel(writer, sheet_name='Master List', index=False)
         for color in colors:
             if color == "Multicolor":
-                # Match anything with '/' OR explicitly 'Multicolor'
                 color_df = df[df['color'].str.contains('/', na=False) | (df['color'] == 'Multicolor')]
             else:
-                # Match exact or as part of a list
                 color_df = df[df['color'].apply(lambda x: color == x or (isinstance(x, str) and color in x.split('/')))]
             
             if not color_df.empty:
@@ -142,6 +230,11 @@ if 'should_rerun' not in st.session_state:
     st.session_state.should_rerun = False
 
 st.title("🎴 MTG Card Collection Manager")
+
+if db_type == "postgres":
+    st.caption("🟢 Database Status: Connected to Cloud Database (Supabase PostgreSQL)")
+else:
+    st.caption("🟡 Database Status: Running locally (SQLite). Add Supabase secrets to connect to cloud database.")
 
 # Session Manager Section
 st.header("Session Manager")
@@ -229,7 +322,6 @@ with st.sidebar.form("card_form", clear_on_submit=(not st.session_state.editing_
     colors_list = ["White", "Blue", "Black", "Red", "Green", "Colorless", "Multicolor"]
     current_color_str = get_val('color', 'White')
     
-    # Interpret "color/color" as multiselected
     if isinstance(current_color_str, str) and "/" in current_color_str:
         default_colors = [c.strip() for c in current_color_str.split("/")]
     elif current_color_str in colors_list:
@@ -258,7 +350,6 @@ with st.sidebar.form("card_form", clear_on_submit=(not st.session_state.editing_
         if name:
             s_code = set_code.strip().upper()
             c_num = collector_num.strip()
-            # Join selected colors with '/'
             color_to_save = "/".join(color) if color else "Colorless"
             card_data = {
                 "name": name, "color": color_to_save, "quantity": quantity,
@@ -308,7 +399,6 @@ search = st.text_input("Search Name", key="filter_search")
 
 filtered_df = df.copy()
 if f_color:
-    # Improved color filtering for multiselect
     color_mask = filtered_df['color'].apply(lambda x: any(c in str(x) for c in f_color))
     filtered_df = filtered_df[color_mask]
 if f_cat:
@@ -335,7 +425,6 @@ if not filtered_df.empty:
     
     styled_df = filtered_df.style.apply(highlight_rows, axis=1)
     
-    # Enable row selection
     selection = st.dataframe(
         styled_df, 
         use_container_width=True, 
@@ -345,7 +434,6 @@ if not filtered_df.empty:
         selection_mode="single-row"
     )
 
-    # Check for selection
     if selection and "selection" in selection and selection["selection"]["rows"]:
         selected_row_idx = selection["selection"]["rows"][0]
         selected_card = filtered_df.iloc[selected_row_idx]
@@ -387,9 +475,6 @@ if not df.empty:
 
 else:
     st.info("Your collection is currently empty. Add some cards in the sidebar!")
-
-st.markdown("---")
-st.caption("Tip: To use this 'from anywhere', host this code on GitHub and connect it to [Streamlit Cloud](https://streamlit.io/cloud).")
 
 if st.session_state.should_rerun:
     st.session_state.should_rerun = False

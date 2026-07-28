@@ -1,0 +1,13 @@
+# Streamlit secrets & local config
+.streamlit/secrets.toml
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Python / Environment
+.venv/
+__pycache__/
+*.pyc
+.DS_Store

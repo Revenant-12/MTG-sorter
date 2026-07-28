@@ -1,11 +1,13 @@
 [project]
 name = "mtg"
 version = "0.1.0"
-description = "Add your description here"
+description = "MTG Card Collection Manager"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "pandas",
     "tkinterdnd2",
-    "openpyxl"
+    "openpyxl",
+    "psycopg2-binary",
+    "sqlalchemy"
 ]
