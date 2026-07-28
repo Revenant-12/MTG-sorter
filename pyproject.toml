@@ -9,5 +9,9 @@ dependencies = [
     "tkinterdnd2",
     "openpyxl",
     "psycopg2-binary",
-    "sqlalchemy"
+    "sqlalchemy",
+    "requests",
+    "Pillow",
+    "opencv-python-headless",
+    "pytesseract"
 ]

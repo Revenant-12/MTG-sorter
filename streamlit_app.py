@@ -3,6 +3,7 @@ import pandas as pd
 import sqlite3
 import os
 from sqlalchemy import create_engine, text
+import scryfall_scanner
 
 # Local fallback database file
 DB_FILE = "mtg_collection.db"
@@ -267,6 +268,70 @@ with s_col4:
     if st.button("Unhighlight Cards", use_container_width=True):
         st.session_state.highlight_session = False
 
+# Camera & Scryfall Scanner Section
+st.divider()
+st.header("📷 Card Scanner & Quick Search")
+tab_scan, tab_search = st.tabs(["📷 Camera / Image Scanner", "🔍 Scryfall Auto-Search"])
+
+with tab_scan:
+    scan_c1, scan_c2 = st.columns([1, 1])
+    with scan_c1:
+        camera_photo = st.camera_input("Snap Card Photo with Camera")
+    with scan_c2:
+        uploaded_photo = st.file_uploader("Or Upload Card Image File", type=["jpg", "jpeg", "png"])
+        
+    captured = camera_photo or uploaded_photo
+    if captured:
+        if st.button("⚡ Scan Photo & Extract Card Details", type="primary"):
+            with st.spinner("Scanning card image and looking up Scryfall metadata..."):
+                card_dict, raw_text = scryfall_scanner.scan_card_image(captured.getvalue())
+                if card_dict:
+                    st.session_state.selected_card = card_dict
+                    st.success(f"Successfully identified: **{card_dict['name']}** ({card_dict['color']} {card_dict['card_category']})!")
+                    st.session_state.should_rerun = True
+                else:
+                    st.warning("Could not automatically match card from image text. Try typing the name in Scryfall search below.")
+                    if raw_text:
+                        st.caption(f"Detected text snippet: {raw_text[:150]}")
+
+with tab_search:
+    sch_c1, sch_c2 = st.columns([2, 1])
+    with sch_c1:
+        search_query = st.text_input("Card Name (Fuzzy Search)", placeholder="e.g. Froghemoth, Sol Ring, Abandoned Air Temple")
+        if search_query:
+            suggestions = scryfall_scanner.autocomplete_card_name(search_query)
+            if suggestions:
+                selected_sug = st.selectbox("Suggestions from Scryfall:", suggestions)
+                if st.button("Autofill Selected Card Details"):
+                    c_data = scryfall_scanner.fetch_card_by_name(selected_sug)
+                    if c_data:
+                        st.session_state.selected_card = c_data
+                        st.success(f"Autofilled details for **{c_data['name']}**!")
+                        st.session_state.should_rerun = True
+            else:
+                if st.button("Search Scryfall directly"):
+                    c_data = scryfall_scanner.fetch_card_by_name(search_query)
+                    if c_data:
+                        st.session_state.selected_card = c_data
+                        st.success(f"Autofilled details for **{c_data['name']}**!")
+                        st.session_state.should_rerun = True
+                    else:
+                        st.error("No card found matching that name on Scryfall.")
+    with sch_c2:
+        set_code_in = st.text_input("Set Code (Optional)", placeholder="e.g. AFR, TLA")
+        coll_num_in = st.text_input("Collector # (Optional)", placeholder="e.g. 184, 0263")
+        if set_code_in and coll_num_in:
+            if st.button("Fetch by Set & Collector #"):
+                c_data = scryfall_scanner.fetch_card_by_set_collector(set_code_in, coll_num_in)
+                if c_data:
+                    st.session_state.selected_card = c_data
+                    st.success(f"Found **{c_data['name']}** ({set_code_in.upper()} #{coll_num_in})!")
+                    st.session_state.should_rerun = True
+                else:
+                    st.error("No card found with that set code and collector number.")
+
+st.divider()
+
 # Sidebar - Add/Edit Card
 if st.session_state.editing_id:
     st.sidebar.header(f"Editing: {st.session_state.selected_card['name']}")
@@ -276,6 +341,10 @@ if st.session_state.editing_id:
         st.session_state.should_rerun = True
 else:
     st.sidebar.header("Add New Card")
+
+# Show preview image if available
+if st.session_state.selected_card and st.session_state.selected_card.get("image_url"):
+    st.sidebar.image(st.session_state.selected_card["image_url"], use_container_width=True)
 
 # Category selection
 card_types = [
