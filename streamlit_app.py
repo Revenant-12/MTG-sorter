@@ -31,18 +31,23 @@ def get_db_engine():
                 url = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
         elif "postgres" in st.secrets or "supabase" in st.secrets:
             p = st.secrets.get("postgres") or st.secrets.get("supabase")
-            user = p.get("user", "postgres")
+            user = p.get("username", p.get("user", "postgres"))
             password = p.get("password", "")
             host = p.get("host", "localhost")
             port = p.get("port", 5432)
-            dbname = p.get("dbname", "postgres")
+            dbname = p.get("database", p.get("dbname", "postgres"))
             url = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
 
         if url:
             if url.startswith("postgres://"):
                 url = url.replace("postgres://", "postgresql://", 1)
-            return create_engine(url, pool_pre_ping=True), "postgres"
-    except Exception:
+            engine = create_engine(url, pool_pre_ping=True)
+            # Test connection
+            with engine.connect() as test_conn:
+                test_conn.execute(text("SELECT 1"))
+            return engine, "postgres"
+    except Exception as e:
+        st.error(f"⚠️ Cloud Database Connection Error: {e}")
         pass
 
     # Fallback to local SQLite engine
