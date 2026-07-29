@@ -99,11 +99,17 @@ def create_table():
                     UNIQUE(name, card_category, set_code, collector_number)
                 )
             """))
-            for col_name in ["set_code", "collector_number", "collection_id", "storage"]:
-                try:
+        
+        # Ensure optional columns exist in both Postgres and SQLite
+        for col_name in ["set_code", "collector_number", "collection_id", "storage"]:
+            try:
+                if db_type == "postgres":
+                    conn.execute(text(f"ALTER TABLE cards ADD COLUMN IF NOT EXISTS {col_name} TEXT"))
+                else:
                     conn.execute(text(f"ALTER TABLE cards ADD COLUMN {col_name} TEXT"))
-                except Exception:
-                    pass
+            except Exception:
+                pass
+
         # Auto-migrate existing space-separated subtypes to comma-separated format
         try:
             rows = conn.execute(text("SELECT id, subtypes FROM cards WHERE subtypes IS NOT NULL AND subtypes != ''")).fetchall()
@@ -134,6 +140,8 @@ def format_subtypes(subtypes_str):
 def load_data():
     with engine.connect() as conn:
         df = pd.read_sql_query(text("SELECT * FROM cards ORDER BY name ASC"), conn)
+    if not df.empty and 'storage' not in df.columns:
+        df['storage'] = ''
     return df
 
 def get_split_subtypes(df):
