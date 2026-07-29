@@ -1,3 +1,4 @@
+# Version 1.1.0 - Scryfall Scanner & Printings Module
 import requests
 import re
 import urllib.parse

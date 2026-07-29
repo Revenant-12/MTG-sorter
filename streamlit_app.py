@@ -354,7 +354,10 @@ if st.session_state.selected_card and st.session_state.selected_card.get('name')
     with st.sidebar.expander("✨ Suggest Set Code & Collector # (Scryfall)"):
         if st.button(f"🔍 Fetch Printings for '{card_n}'", use_container_width=True):
             with st.spinner("Searching Scryfall for card printings..."):
-                st.session_state.printings_list = scryfall_scanner.fetch_card_printings(card_n)
+                import importlib
+                importlib.reload(scryfall_scanner)
+                fetch_func = getattr(scryfall_scanner, 'fetch_card_printings', scryfall_scanner.fetch_card_printings)
+                st.session_state.printings_list = fetch_func(card_n)
         
         if st.session_state.get('printings_list'):
             printing_labels = [p['label'] for p in st.session_state.printings_list]
