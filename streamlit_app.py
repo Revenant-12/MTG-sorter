@@ -343,9 +343,30 @@ if st.session_state.editing_id:
     if st.sidebar.button("Cancel Edit"):
         st.session_state.editing_id = None
         st.session_state.selected_card = None
+        st.session_state.printings_list = None
         st.session_state.should_rerun = True
 else:
     st.sidebar.header("Add New Card")
+
+# Scryfall Printing Finder for Editing / Auto-suggest Set & Collector #
+if st.session_state.selected_card and st.session_state.selected_card.get('name'):
+    card_n = st.session_state.selected_card['name']
+    with st.sidebar.expander("✨ Suggest Set Code & Collector # (Scryfall)"):
+        if st.button(f"🔍 Fetch Printings for '{card_n}'", use_container_width=True):
+            with st.spinner("Searching Scryfall for card printings..."):
+                st.session_state.printings_list = scryfall_scanner.fetch_card_printings(card_n)
+        
+        if st.session_state.get('printings_list'):
+            printing_labels = [p['label'] for p in st.session_state.printings_list]
+            selected_p_label = st.selectbox("Select Specific Printing / Set:", printing_labels)
+            if st.button("Apply Selected Printing"):
+                idx = printing_labels.index(selected_p_label)
+                chosen_card = st.session_state.printings_list[idx]['card_data']
+                if st.session_state.editing_id:
+                    chosen_card['id'] = st.session_state.editing_id
+                st.session_state.selected_card = chosen_card
+                st.success(f"Applied: {chosen_card['set_code']} #{chosen_card['collector_number']}")
+                st.session_state.should_rerun = True
 
 # Show preview image if available
 if st.session_state.selected_card and st.session_state.selected_card.get("image_url"):

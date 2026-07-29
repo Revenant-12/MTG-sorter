@@ -173,6 +173,41 @@ def fetch_card_by_set_collector(set_code, collector_number):
         print(f"Scryfall query error: {e}")
     return None
 
+def fetch_card_printings(card_name):
+    """
+    Fetches all printings (sets and collector numbers) for a given card name from Scryfall API.
+    Returns a list of dicts: [{'label': ..., 'set_code': ..., 'collector_number': ..., 'card_data': ...}]
+    """
+    if not card_name or not card_name.strip():
+        return []
+    
+    clean_name = card_name.strip()
+    encoded = urllib.parse.quote(clean_name)
+    url = f"{SCRYFALL_BASE_URL}/cards/search?q=%21%22{encoded}%22+include%3Aextras&unique=prints"
+    
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json().get("data", [])
+            printings = []
+            for item in data:
+                set_code = item.get("set", "").upper()
+                collector_num = str(item.get("collector_number", ""))
+                set_name = item.get("set_name", "")
+                parsed = parse_scryfall_card(item)
+                label = f"{set_code} - #{collector_num} ({set_name})"
+                printings.append({
+                    "label": label,
+                    "set_code": set_code,
+                    "collector_number": collector_num,
+                    "set_name": set_name,
+                    "card_data": parsed
+                })
+            return printings
+    except Exception as e:
+        print(f"Error fetching printings: {e}")
+    return []
+
 def autocomplete_card_name(query):
     """
     Fetches card name suggestions from Scryfall API.
@@ -213,12 +248,9 @@ def scan_card_image(image_bytes):
     if not extracted_text:
         return None, "No text detected."
 
-    # Parse potential lines for card names
     lines = [line.strip() for line in extracted_text.splitlines() if len(line.strip()) > 2]
     
-    # Try searching Scryfall for first few clean text lines
     for line in lines[:5]:
-        # Filter out common noisy OCR strings
         clean_line = re.sub(r'[^a-zA-Z0-9\s,\'-]', '', line)
         if len(clean_line) >= 3:
             card = fetch_card_by_name(clean_line)
