@@ -368,10 +368,6 @@ if st.session_state.selected_card and st.session_state.selected_card.get('name')
                 st.success(f"Applied: {chosen_card['set_code']} #{chosen_card['collector_number']}")
                 st.session_state.should_rerun = True
 
-# Show preview image if available
-if st.session_state.selected_card and st.session_state.selected_card.get("image_url"):
-    st.sidebar.image(st.session_state.selected_card["image_url"], use_container_width=True)
-
 # Category selection
 card_types = [
     "Land", "Legendary Creature", "Creature", "Instant", "Sorcery",

@@ -137,8 +137,7 @@ def parse_scryfall_card(card_data):
         "loyalty": loyalty_val,
         "set_code": card_data.get("set", "").upper(),
         "collector_number": str(card_data.get("collector_number", "")),
-        "collection_id": None,
-        "image_url": image_url
+        "collection_id": None
     }
 
 def fetch_card_by_name(name):
