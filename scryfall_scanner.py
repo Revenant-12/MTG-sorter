@@ -76,12 +76,19 @@ def map_category(type_line):
         
     return "Creature"
 
+def format_subtypes(subtypes_str):
+    if not subtypes_str or str(subtypes_str).strip() in ["", "None", "nan"]:
+        return ""
+    raw = str(subtypes_str).replace(',', ' ')
+    words = [w.strip() for w in raw.split() if w.strip()]
+    return ", ".join(words)
+
 def parse_subtypes(type_line):
     if not type_line or "—" not in type_line:
         return ""
     parts = type_line.split("—")
     if len(parts) > 1:
-        return parts[1].strip()
+        return format_subtypes(parts[1].strip())
     return ""
 
 def parse_scryfall_card(card_data):

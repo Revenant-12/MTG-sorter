@@ -102,6 +102,22 @@ def create_table():
                     conn.execute(text(f"ALTER TABLE cards ADD COLUMN {col_name} TEXT"))
                 except Exception:
                     pass
+        # Auto-migrate existing space-separated subtypes to comma-separated format
+        try:
+            rows = conn.execute(text("SELECT id, subtypes FROM cards WHERE subtypes IS NOT NULL AND subtypes != ''")).fetchall()
+            for r_id, sub_str in rows:
+                formatted_sub = format_subtypes(sub_str)
+                if formatted_sub != sub_str:
+                    conn.execute(text("UPDATE cards SET subtypes = :sub WHERE id = :id"), {"sub": formatted_sub, "id": r_id})
+        except Exception:
+            pass
+
+def format_subtypes(subtypes_str):
+    if not subtypes_str or str(subtypes_str).strip() in ["", "None", "nan"]:
+        return ""
+    raw = str(subtypes_str).replace(',', ' ')
+    words = [w.strip() for w in raw.split() if w.strip()]
+    return ", ".join(words)
 
 def load_data():
     with engine.connect() as conn:
@@ -113,11 +129,13 @@ def get_split_subtypes(df):
         return []
     unique_subs = set()
     for s_str in df['subtypes'].dropna():
-        parts = [p.strip() for p in str(s_str).split(',')]
+        parts = [p.strip() for p in str(s_str).replace(',', ' ').split()]
         unique_subs.update(parts)
     return sorted([s for s in unique_subs if s])
 
 def add_card(data):
+    formatted_sub = format_subtypes(data.get('subtypes'))
+    data['subtypes'] = formatted_sub
     params = {
         "name": data['name'],
         "card_category": data['card_category'],
@@ -148,7 +166,7 @@ def add_card(data):
                 "card_category": data['card_category'],
                 "mana_cost": data['mana_cost'],
                 "power_toughness": data['power_toughness'],
-                "subtypes": data['subtypes'],
+                "subtypes": formatted_sub,
                 "keywords": data['keywords'],
                 "ability": data['ability'],
                 "loyalty": data['loyalty'],
@@ -172,6 +190,7 @@ def add_card(data):
             return row_id
 
 def update_card(card_id, data):
+    formatted_sub = format_subtypes(data.get('subtypes'))
     update_params = {
         "id": card_id,
         "name": data['name'],
@@ -180,7 +199,7 @@ def update_card(card_id, data):
         "card_category": data['card_category'],
         "mana_cost": data['mana_cost'],
         "power_toughness": data['power_toughness'],
-        "subtypes": data['subtypes'],
+        "subtypes": formatted_sub,
         "keywords": data['keywords'],
         "ability": data['ability'],
         "loyalty": data['loyalty'],
