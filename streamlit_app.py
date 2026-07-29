@@ -74,6 +74,7 @@ def create_table():
                     set_code TEXT,
                     collector_number TEXT,
                     collection_id TEXT,
+                    storage TEXT,
                     CONSTRAINT unique_card_instance UNIQUE(name, card_category, set_code, collector_number)
                 )
             """))
@@ -94,10 +95,11 @@ def create_table():
                     set_code TEXT,
                     collector_number TEXT,
                     collection_id TEXT,
+                    storage TEXT,
                     UNIQUE(name, card_category, set_code, collector_number)
                 )
             """))
-            for col_name in ["set_code", "collector_number", "collection_id"]:
+            for col_name in ["set_code", "collector_number", "collection_id", "storage"]:
                 try:
                     conn.execute(text(f"ALTER TABLE cards ADD COLUMN {col_name} TEXT"))
                 except Exception:
@@ -156,7 +158,7 @@ def add_card(data):
         if result:
             row_id, existing_qty = result[0], result[1]
             new_qty = existing_qty + data['quantity']
-            conn.execute(text("UPDATE cards SET quantity = :quantity WHERE id = :id"), {"quantity": new_qty, "id": row_id})
+            conn.execute(text("UPDATE cards SET quantity = :quantity, storage = :storage WHERE id = :id"), {"quantity": new_qty, "storage": data.get('storage'), "id": row_id})
             return row_id
         else:
             insert_params = {
@@ -172,19 +174,20 @@ def add_card(data):
                 "loyalty": data['loyalty'],
                 "set_code": data.get('set_code'),
                 "collector_number": data.get('collector_number'),
-                "collection_id": data.get('collection_id')
+                "collection_id": data.get('collection_id'),
+                "storage": data.get('storage')
             }
             if db_type == "postgres":
                 res = conn.execute(text("""
-                    INSERT INTO cards (name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number, collection_id)
-                    VALUES (:name, :color, :quantity, :card_category, :mana_cost, :power_toughness, :subtypes, :keywords, :ability, :loyalty, :set_code, :collector_number, :collection_id)
+                    INSERT INTO cards (name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number, collection_id, storage)
+                    VALUES (:name, :color, :quantity, :card_category, :mana_cost, :power_toughness, :subtypes, :keywords, :ability, :loyalty, :set_code, :collector_number, :collection_id, :storage)
                     RETURNING id
                 """), insert_params)
                 row_id = res.fetchone()[0]
             else:
                 res = conn.execute(text("""
-                    INSERT INTO cards (name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number, collection_id)
-                    VALUES (:name, :color, :quantity, :card_category, :mana_cost, :power_toughness, :subtypes, :keywords, :ability, :loyalty, :set_code, :collector_number, :collection_id)
+                    INSERT INTO cards (name, color, quantity, card_category, mana_cost, power_toughness, subtypes, keywords, ability, loyalty, set_code, collector_number, collection_id, storage)
+                    VALUES (:name, :color, :quantity, :card_category, :mana_cost, :power_toughness, :subtypes, :keywords, :ability, :loyalty, :set_code, :collector_number, :collection_id, :storage)
                 """), insert_params)
                 row_id = res.lastrowid
             return row_id
@@ -205,7 +208,8 @@ def update_card(card_id, data):
         "loyalty": data['loyalty'],
         "set_code": data['set_code'],
         "collector_number": data['collector_number'],
-        "collection_id": data.get('collection_id')
+        "collection_id": data.get('collection_id'),
+        "storage": data.get('storage')
     }
     with engine.begin() as conn:
         conn.execute(text("""
@@ -213,7 +217,8 @@ def update_card(card_id, data):
                 name = :name, color = :color, quantity = :quantity, card_category = :card_category, 
                 mana_cost = :mana_cost, power_toughness = :power_toughness, subtypes = :subtypes, 
                 keywords = :keywords, ability = :ability, loyalty = :loyalty, 
-                set_code = :set_code, collector_number = :collector_number, collection_id = :collection_id 
+                set_code = :set_code, collector_number = :collector_number, collection_id = :collection_id,
+                storage = :storage
             WHERE id = :id
         """), update_params)
 
@@ -384,8 +389,15 @@ if st.session_state.selected_card and st.session_state.selected_card.get('name')
             if st.button("Apply Selected Printing"):
                 idx = printing_labels.index(selected_p_label)
                 chosen_card = st.session_state.printings_list[idx]['card_data']
+                
+                # Preserve existing quantity, storage, collection_id, and ID
+                if st.session_state.selected_card:
+                    chosen_card['quantity'] = st.session_state.selected_card.get('quantity', 1)
+                    chosen_card['storage'] = st.session_state.selected_card.get('storage', 'Blue')
+                    chosen_card['collection_id'] = st.session_state.selected_card.get('collection_id')
                 if st.session_state.editing_id:
                     chosen_card['id'] = st.session_state.editing_id
+
                 st.session_state.selected_card = chosen_card
                 st.success(f"Applied: {chosen_card['set_code']} #{chosen_card['collector_number']}")
                 st.session_state.should_rerun = True
@@ -444,6 +456,11 @@ with st.sidebar.form("card_form", clear_on_submit=(not st.session_state.editing_
         
     color = st.multiselect("Color", colors_list, default=default_colors)
     
+    storage_options = ["Blue", "Black", "Red", "Green", "White", "Colorless"]
+    current_storage = get_val('storage', 'Blue')
+    storage_idx = storage_options.index(current_storage) if current_storage in storage_options else 0
+    storage = st.selectbox("Storage", storage_options, index=storage_idx)
+    
     quantity = st.number_input("Quantity", min_value=1, value=int(get_val('quantity', 1)))
     
     collection_id = st.text_input("Collection ID", value=get_val('collection_id'))
@@ -471,7 +488,8 @@ with st.sidebar.form("card_form", clear_on_submit=(not st.session_state.editing_
                 "loyalty": int(loyalty) if (loyalty and str(loyalty).isdigit()) else None,
                 "set_code": s_code if s_code else None,
                 "collector_number": c_num if c_num else None,
-                "collection_id": collection_id if collection_id else None
+                "collection_id": collection_id if collection_id else None,
+                "storage": storage
             }
             
             if st.session_state.editing_id:
@@ -532,7 +550,7 @@ def highlight_rows(row):
 
 if not filtered_df.empty:
     cols_to_show = [col for col in filtered_df.columns if col != 'id']
-    essential = ['name', 'set_code', 'collector_number', 'color', 'quantity', 'card_category']
+    essential = ['name', 'set_code', 'collector_number', 'color', 'quantity', 'card_category', 'storage']
     active_cols = [col for col in cols_to_show if col in essential or 
                    filtered_df[col].apply(lambda x: str(x).strip() not in ['', 'None', 'nan'] if x is not None else False).any()]
     
