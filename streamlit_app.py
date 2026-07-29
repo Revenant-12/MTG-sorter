@@ -113,6 +113,16 @@ def create_table():
                     conn.execute(text("UPDATE cards SET subtypes = :sub WHERE id = :id"), {"sub": formatted_sub, "id": r_id})
         except Exception:
             pass
+            
+        # Auto-migrate single-color cards to match storage column if empty
+        try:
+            s_options = ["Blue", "Black", "Red", "Green", "White", "Colorless"]
+            rows_s = conn.execute(text("SELECT id, color, storage FROM cards WHERE storage IS NULL OR storage = '' OR storage = 'nan'")).fetchall()
+            for r_id, col_str, stor_str in rows_s:
+                if col_str in s_options:
+                    conn.execute(text("UPDATE cards SET storage = :stor WHERE id = :id"), {"stor": col_str, "id": r_id})
+        except Exception:
+            pass
 
 def format_subtypes(subtypes_str):
     if not subtypes_str or str(subtypes_str).strip() in ["", "None", "nan"]:
@@ -457,7 +467,18 @@ with st.sidebar.form("card_form", clear_on_submit=(not st.session_state.editing_
     color = st.multiselect("Color", colors_list, default=default_colors)
     
     storage_options = ["Blue", "Black", "Red", "Green", "White", "Colorless"]
-    current_storage = get_val('storage', 'Blue')
+    
+    # Auto-match storage dropdown for single-color cards
+    default_storage_fallback = "Blue"
+    if len(color) == 1 and color[0] in storage_options:
+        default_storage_fallback = color[0]
+    elif isinstance(current_color_str, str) and current_color_str in storage_options:
+        default_storage_fallback = current_color_str
+
+    current_storage = get_val('storage', '')
+    if not current_storage or current_storage not in storage_options or current_storage == 'nan':
+        current_storage = default_storage_fallback
+
     storage_idx = storage_options.index(current_storage) if current_storage in storage_options else 0
     storage = st.selectbox("Storage", storage_options, index=storage_idx)
     
